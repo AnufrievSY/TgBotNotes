@@ -164,45 +164,62 @@ function formatDateTime_(d) {
 }
 
 function appendItemsToCell_(cell, items) {
-  // cell text looks like multiple lines: "Artist - Track"
-  const oldText = String(cell.getDisplayValue() || "").trim();
-  const oldLines = oldText ? oldText.split("\n").map(s => s.trim()).filter(Boolean) : [];
+  // 1) читаем старый rich text, чтобы не потерять ссылки
+  const rich = cell.getRichTextValue();
+  const oldText = rich ? String(rich.getText() || "") : String(cell.getDisplayValue() || "");
+  const oldLines = oldText ? oldText.split("\n") : [];
 
-  const seenText = new Set(oldLines);
+  // 2) восстановим map: lineText -> linkUrl из старого rich
+  // (если строка повторяется, возьмем первую встретившуюся ссылку)
+  const linkByText = {}; // text -> url
+  if (rich && oldText) {
+    let pos = 0;
+    for (let i = 0; i < oldLines.length; i++) {
+      const line = String(oldLines[i] || "");
+      const lineLen = line.length;
 
-  // соберём итоговые строки и параллельно запомним ссылку на каждую строку
-  // ВАЖНО: ссылки восстанавливаем только для новых строк, старые (если были) оставляем просто текстом
-  let lines = [...oldLines];
-  let linkMap = {}; // lineText -> url (только для новых добавленных)
+      // ссылка в рамках этой строки: возьмём ссылку первого символа строки
+      // (у нас весь line обычно под одной ссылкой)
+      if (lineLen > 0) {
+        const url = rich.getLinkUrl(pos, pos + 1);
+        if (url && !linkByText[line]) linkByText[line] = url;
+      }
+
+      pos += lineLen + 1; // + '\n'
+    }
+  }
+
+  // 3) добавляем новые элементы (антидубль по text)
+  const lines = oldLines.filter(s => String(s).trim() !== "");
+  const seen = new Set(lines);
 
   let added = 0;
-
   for (let i = 0; i < items.length; i++) {
-    const link = String(items[i].link || "").trim();
-    const text = String(items[i].text || "").trim();
+    const link = String((items[i] && items[i].link) || "").trim();
+    const text = String((items[i] && items[i].text) || "").trim();
     if (!link || !text) continue;
 
-    if (seenText.has(text)) continue; // антидубль по тексту
-    seenText.add(text);
+    if (seen.has(text)) continue;
+    seen.add(text);
 
     lines.push(text);
-    linkMap[text] = link;
+    linkByText[text] = link;
     added += 1;
   }
 
+  // 4) собираем новый rich text и проставляем ссылки для ВСЕХ строк
   const newText = lines.join("\n");
-
   const builder = SpreadsheetApp.newRichTextValue().setText(newText);
 
-  // делаем кликабельными только строки, которые добавили сейчас
   let pos = 0;
   for (let i = 0; i < lines.length; i++) {
-    const lineText = lines[i];
+    const line = lines[i];
     const start = pos;
-    const end = pos + lineText.length;
+    const end = pos + line.length;
 
-    if (linkMap[lineText]) {
-      builder.setLinkUrl(start, end, linkMap[lineText]);
+    const url = linkByText[line];
+    if (url && line.length > 0) {
+      builder.setLinkUrl(start, end, url);
     }
 
     pos = end + 1;
@@ -213,4 +230,3 @@ function appendItemsToCell_(cell, items) {
 
   return added;
 }
-
