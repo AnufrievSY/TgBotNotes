@@ -1,0 +1,1 @@
+from src.infra.yandex_music import get_info
